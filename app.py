@@ -6,21 +6,24 @@ import io
 import re
 from datetime import datetime
 
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-from openpyxl.formatting.rule import DataBarRule
-from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.worksheet.datavalidation import DataValidation
-
-# Configuração da Página do Streamlit
+# Configuração Avançada da Página do Streamlit
 st.set_page_config(
-    page_title="Inteligência de FIDCs - CVM",
+    page_title="Inteligência de Mercado - FIDCs & Investidores",
     page_icon="📊",
     layout="wide"
 )
 
-# Funções auxiliares (mesmas da sua rotina original)
+# Estilização visual limpa via CSS customizado
+st.markdown("""
+    <style>
+        .main { background-color: #F8F9FA; }
+        .stMetric { background-color: #FFFFFF; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# FUNÇÕES DE PROCESSAMENTO E NORMALIZAÇÃO (CVM)
+# ---------------------------------------------------------
 def obter_nome_mes(ano_mes):
     ano = ano_mes[:4]
     mes_num = ano_mes[4:]
@@ -228,7 +231,7 @@ def processar_mes_cda(ano_mes, cad_info, id_fundo_map, fidc_cnpjs_set):
     df_final = pd.DataFrame(registros)
     return df_final.drop_duplicates(subset=['CNPJ_FIDC_INVESTIDO', 'CNPJ_FUNDO_INVESTIDOR', 'VALOR_ALOCADO_RS']).sort_values(by=['NOME_FIDC_INVESTIDO', 'VALOR_ALOCADO_RS'], ascending=[True, False])
 
-@st.cache_data(show_spinner="Baixando e processando bases de cadastros e CDA da CVM...")
+@st.cache_data(ttl=604800, show_spinner="Baixando e processando bases de cadastros e CDA da CVM...")
 def carregar_dados_completos():
     cad_info = {}
     id_fundo_map = {}
@@ -276,26 +279,89 @@ def carregar_dados_completos():
     df_master = pd.concat(master_list, ignore_index=True) if master_list else pd.DataFrame()
     return dados_por_mes, df_master
 
-# Interface Visual do App Streamlit
-st.title("📊 Painel de Inteligência de Mercado - FIDCs & Investidores")
-st.markdown("Consulta interativa de alocações em FIDCs extraída diretamente das bases públicas da CVM.")
+# ---------------------------------------------------------
+# INTERFACE VISUAL DO APLICATIVO
+# ---------------------------------------------------------
+st.title("📊 Inteligência de Mercado: Alocações em FIDCs")
+st.markdown("Painel executivo estruturado com base nos dados públicos da CVM (Resolução CVM 175 e CDA).")
 
 dados_por_mes, df_master = carregar_dados_completos()
 
 if not df_master.empty:
     meses_disponiveis = list(dados_por_mes.keys())
-    mes_escolhido = st.sidebar.selectbox("Selecione o Período Base:", meses_disponiveis, format_func=obter_nome_mes)
+    
+    # Barra lateral de navegação
+    st.sidebar.header("⚙️ Configurações de Filtro")
+    mes_escolhido = st.sidebar.selectbox("Selecione o Mês Base:", meses_disponiveis, format_func=obter_nome_mes)
     
     df_filtrado = dados_por_mes[mes_escolhido]
-    
-    st.subheader(f"Visão Geral - {obter_nome_mes(mes_escolhido)}")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total de Alocações Identificadas", len(df_filtrado))
-    col2.metric("Volume Total Alocado", f"R$ {df_filtrado['VALOR_ALOCADO_RS'].sum():,.2f}")
-    col3.metric("FIDCs Distintos Envolvidos", df_filtrado['CNPJ_FIDC_INVESTIDO'].nunique())
 
-    st.markdown("---")
-    st.subheader("🔍 Tabela de Alocações Detalhada")
-    st.dataframe(df_filtrado, use_container_width=True)
+    # Abas estruturadas idênticas à lógica do Excel profissional
+    aba_dash, aba_mensal, aba_consolidada = st.tabs([
+        "📈 Painel Executivo (Dashboard)", 
+        f"📅 Detalhado ({obter_nome_mes(mes_escolhido)})", 
+        "📚 Base Consolidada (Série Histórica)"
+    ])
+
+    with aba_dash:
+        st.subheader(f"Visão Executiva do Período: {obter_nome_mes(mes_escolhido)}")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Volume Total Alocado", f"R$ {df_filtrado['VALOR_ALOCADO_RS'].sum():,.2f}")
+        col2.metric("Total de Alocações", len(df_filtrado))
+        col3.metric("FIDCs Distintos", df_filtrado['CNPJ_FIDC_INVESTIDO'].nunique())
+        col4.metric("Fundos Investidores", df_filtrado['CNPJ_FUNDO_INVESTIDOR'].nunique())
+
+        st.markdown("---")
+        
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.markdown("### 🏆 Top Fundos Investidores por Volume")
+            top_fundos = df_filtrado.groupby('NOME_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
+            top_fundos = top_fundos.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
+            top_fundos['VALOR_ALOCADO_RS'] = top_fundos['VALOR_ALOCADO_RS'].apply(lambda x: f"R$ {x:,.2f}")
+            st.dataframe(top_fundos, use_container_width=True, hide_index=True)
+
+        with col_g2:
+            st.markdown("### 🏢 Top Gestoras Investidoras por Volume")
+            top_gestoras = df_filtrado.groupby('GESTOR_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
+            top_gestoras = top_gestoras.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
+            top_gestoras['VALOR_ALOCADO_RS'] = top_gestoras['VALOR_ALOCADO_RS'].apply(lambda x: f"R$ {x:,.2f}")
+            st.dataframe(top_gestoras, use_container_width=True, hide_index=True)
+
+    with aba_mensal:
+        st.subheader(f"Detalhamento Completo - {obter_nome_mes(mes_escolhido)}")
+        st.markdown("Tabela completa com todas as alocações, máscaras de CNPJ aplicadas e formatação monetária.")
+        
+        st.dataframe(
+            df_filtrado,
+            use_container_width=True,
+            column_config={
+                "PL_FIDC_INVESTIDO_RS": st.column_config.NumberColumn("PL FIDC", format="R$ %.2f"),
+                "PL_FUNDO_INVESTIDOR_RS": st.column_config.NumberColumn("PL Fundo Investidor", format="R$ %.2f"),
+                "VALOR_ALOCADO_RS": st.column_config.NumberColumn("Valor Alocado", format="R$ %.2f"),
+                "PARTICIPACAO_PL_INVESTIDOR": st.column_config.NumberColumn("% Part. PL Fundo", format="%.2f%%"),
+                "PARTICIPACAO_PL_FIDC": st.column_config.NumberColumn("% Part. PL FIDC", format="%.2f%%"),
+                "COTISTAS_FIDC_INVESTIDO": st.column_config.NumberColumn("Cotistas FIDC", format="%d"),
+                "COTISTAS_FUNDO_INVESTIDOR": st.column_config.NumberColumn("Cotistas Fundo", format="%d"),
+            }
+        )
+
+    with aba_consolidada:
+        st.subheader("📚 Série Histórica Consolidada")
+        st.markdown("Histórico completo de todos os meses processados no ano corrente.")
+        
+        st.dataframe(
+            df_master,
+            use_container_width=True,
+            column_config={
+                "PL_FIDC_INVESTIDO_RS": st.column_config.NumberColumn("PL FIDC", format="R$ %.2f"),
+                "PL_FUNDO_INVESTIDOR_RS": st.column_config.NumberColumn("PL Fundo Investidor", format="R$ %.2f"),
+                "VALOR_ALOCADO_RS": st.column_config.NumberColumn("Valor Alocado", format="R$ %.2f"),
+                "PARTICIPACAO_PL_INVESTIDOR": st.column_config.NumberColumn("% Part. PL Fundo", format="%.2f%%"),
+                "PARTICIPACAO_PL_FIDC": st.column_config.NumberColumn("% Part. PL FIDC", format="%.2f%%"),
+            }
+        )
 else:
-    st.error("Não foram encontrados dados de CDA para o período atual.")
+    st.error("Não foram encontrados dados de CDA disponíveis na CVM para o período atual.")
