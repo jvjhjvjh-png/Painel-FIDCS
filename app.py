@@ -20,6 +20,7 @@ st.markdown("""
         .stMetric { background-color: #FFFFFF; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-left: 5px solid #1B365D; }
         .footer { text-align: center; padding: 25px; color: #6C757D; font-size: 14px; border-top: 1px solid #E9ECEF; margin-top: 50px; }
         .update-box { background-color: #E8EEF5; padding: 12px; border-radius: 6px; font-size: 13px; color: #1B365D; margin-bottom: 20px; border: 1px solid #CBD5E1; }
+        .card-box { background-color: #FFFFFF; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #E2E8F0; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -363,10 +364,8 @@ if not df_master.empty:
     origens_disponiveis = sorted(df_mes_base['ORIGEM_CAPTACAO'].dropna().unique())
     origem_filtro = st.sidebar.multiselect("Origem da Captação:", origens_disponiveis)
 
-    # Botão de Filtrar
     btn_filtrar = st.sidebar.button("Filtrar Dados", type="primary", use_container_width=True)
 
-    # Gerenciamento de Estado dos Filtros
     if 'mes_atual' not in st.session_state or st.session_state.mes_atual != mes_escolhido:
         st.session_state.mes_atual = mes_escolhido
         st.session_state.df_filtrado = df_mes_base.copy()
@@ -381,7 +380,6 @@ if not df_master.empty:
 
     df_filtrado = st.session_state.df_filtrado
 
-    # Manual de Utilização integrado na Barra Lateral (Expander)
     with st.sidebar.expander("📖 Manual de Utilização"):
         st.markdown("""
         **1. Fontes de Dados:**
@@ -394,10 +392,12 @@ if not df_master.empty:
         Selecione as opções desejadas e clique em **Filtrar Dados** para atualizar a visualização.
         """)
 
-    aba_dash, aba_mensal, aba_consolidada = st.tabs([
+    aba_dash, aba_mensal, aba_consolidada, aba_consulta, aba_ficha = st.tabs([
         "📈 Painel Executivo (Dashboard)", 
         f"📅 Detalhado ({obter_nome_mes(mes_escolhido)})", 
-        "📚 Base Consolidada"
+        "📚 Base Consolidada",
+        "🔍 Consulta por Fundo",
+        "📊 Ficha Cadastral & Resumo"
     ])
 
     with aba_dash:
@@ -447,8 +447,102 @@ if not df_master.empty:
         st.markdown("Base de dados histórica completa de todos os meses processados no ano corrente.")
         st.dataframe(preparar_df_exibicao(df_master), use_container_width=True, hide_index=True, height=600)
 
+    with aba_consulta:
+        st.subheader("🔍 Consulta Detalhada por Fundo Investidor")
+        st.markdown("Selecione um fundo investidor para analisar individualmente em quais FIDCs ele alocou recursos.")
+        
+        fundos_disponiveis = sorted(df_mes_base['NOME_FUNDO_INVESTIDOR'].dropna().unique())
+        fundo_selecionado = st.selectbox("Escolha ou pesquise o Fundo Investidor:", fundos_disponiveis)
+        
+        if fundo_selecionado:
+            df_detalhe_fundo = df_mes_base[df_mes_base['NOME_FUNDO_INVESTIDOR'] == fundo_selecionado]
+            
+            pl_fundo = df_detalhe_fundo['PL_FUNDO_INVESTIDOR_RS'].iloc[0] if not df_detalhe_fundo.empty else 0
+            total_alocado_fundo = df_detalhe_fundo['VALOR_ALOCADO_RS'].sum()
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Patrimônio Líquido (PL) do Fundo", formatar_brl(pl_fundo))
+            c2.metric("Total Alocado em FIDCs", formatar_brl(total_alocado_fundo))
+            c3.metric("Qtd. de FIDCs Investidos", len(df_detalhe_fundo))
+            
+            st.markdown("---")
+            st.markdown(f"**FIDCs nos quais o fundo '{fundo_selecionado}' investe:**")
+            
+            colunas_foco = ['NOME_FIDC_INVESTIDO', 'GESTOR_FIDC_INVESTIDO', 'VALOR_ALOCADO_RS', 'PARTICIPACAO_PL_INVESTIDOR', 'PARTICIPACAO_PL_FIDC', 'ORIGEM_CAPTACAO']
+            df_exibicao_fundo = df_detalhe_fundo[colunas_foco].copy()
+            st.dataframe(preparar_df_exibicao(df_exibicao_fundo), use_container_width=True, hide_index=True, height=500)
+
+    with aba_ficha:
+        st.subheader("📊 Ficha Cadastral & Resumo do Fundo")
+        st.markdown("Selecione qualquer fundo do ecossistema (FIDC ou Fundo Investidor) para consultar seus dados cadastrais e operacionais completos.")
+        
+        # Cria uma lista unificada de todos os fundos (investidos e investidores)
+        todos_fundos_cad = sorted(list(set(df_mes_base['NOME_FUNDO_INVESTIDOR'].dropna().unique().tolist() + df_mes_base['NOME_FIDC_INVESTIDO'].dropna().unique().tolist())))
+        
+        fundo_ficha = st.selectbox("Selecione o Fundo para ver a Ficha Cadastral:", todos_fundos_cad, key="select_ficha")
+        
+        if fundo_ficha:
+            # Verifica se é um Fundo Investidor ou FIDC
+            is_investidor = df_mes_base['NOME_FUNDO_INVESTIDOR'] == fundo_ficha
+            is_fidc = df_mes_base['NOME_FIDC_INVESTIDO'] == fundo_ficha
+            
+            if is_investidor.any():
+                info_base = df_mes_base[is_investidor].iloc[0]
+                cnpj = info_base['CNPJ_FUNDO_INVESTIDOR']
+                pl = info_base['PL_FUNDO_INVESTIDOR_RS']
+                gestor = info_base['GESTOR_FUNDO_INVESTIDOR']
+                admin = info_base['ADMINISTRADOR_FUNDO_INVESTIDOR']
+                cotistas = info_base['COTISTAS_FUNDO_INVESTIDOR']
+                tipo = info_base['TIPO_FUNDO_INVESTIDOR']
+                publico = info_base['PUBLICO_ALVO_INVESTIDOR']
+                papel = "Fundo Investidor"
+            elif is_fidc.any():
+                info_base = df_mes_base[is_fidc].iloc[0]
+                cnpj = info_base['CNPJ_FIDC_INVESTIDO']
+                pl = info_base['PL_FIDC_INVESTIDO_RS']
+                gestor = info_base['GESTOR_FIDC_INVESTIDO']
+                admin = info_base['ADMINISTRADOR_FIDC_INVESTIDO']
+                cotistas = info_base['COTISTAS_FIDC_INVESTIDO']
+                tipo = "FIDC"
+                publico = "Não informado"
+                papel = "FIDC Investido"
+            else:
+                cnpj, pl, gestor, admin, cotistas, tipo, publico, papel = "-", 0, "-", "-", 0, "-", "-", "-"
+
+            st.markdown(f"### 📄 Resumo Cadastral: {fundo_ficha}")
+            
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Patrimônio Líquido (PL)", formatar_brl(pl))
+            col_m2.metric("Número de Cotistas", f"{cotistas:,}".replace(",", ".") if cotistas > 0 else "N/D")
+            col_m3.metric("Papel no Ecossistema", papel)
+
+            st.markdown("---")
+            
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                st.markdown(f"**CNPJ:** `{cnpj}`")
+                st.markdown(f"**Gestora:** {gestor}")
+                st.markdown(f"**Administradora:** {admin}")
+            with col_info2:
+                st.markdown(f"**Tipo de Fundo:** {tipo}")
+                st.markdown(f"**Público Alvo:** {publico}")
+
+            st.markdown("---")
+            
+            # Se for fundo investidor, mostra o que ele investe
+            if is_investidor.any():
+                st.markdown("#### 🔗 Alocações Realizadas por este Fundo:")
+                df_alocacoes = df_mes_base[is_investidor][['NOME_FIDC_INVESTIDO', 'GESTOR_FIDC_INVESTIDO', 'VALOR_ALOCADO_RS', 'PARTICIPACAO_PL_INVESTIDOR']]
+                st.dataframe(preparar_df_exibicao(df_alocacoes), use_container_width=True, hide_index=True)
+            
+            # Se for FIDC, mostra quem investe nele
+            if is_fidc.any():
+                st.markdown("#### 📥 Fundos que Investem neste FIDC:")
+                df_investidores = df_mes_base[is_fidc][['NOME_FUNDO_INVESTIDOR', 'GESTOR_FUNDO_INVESTIDOR', 'VALOR_ALOCADO_RS', 'PARTICIPACAO_PL_FIDC']]
+                st.dataframe(preparar_df_exibicao(df_investidores), use_container_width=True, hide_index=True)
+
 else:
-    st.error("Não foram encontrados dados de CDA disponíveis na CVM para o período atual.")
+    st.error("Não foram encontrados dados de CDA disponíveis CVM para o período atual.")
 
 # Rodapé oficial
 st.markdown("""
