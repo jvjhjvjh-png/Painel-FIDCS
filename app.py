@@ -13,17 +13,57 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização visual limpa via CSS customizado
+# Estilização visual profissional via CSS customizado
 st.markdown("""
     <style>
         .main { background-color: #F8F9FA; }
-        .stMetric { background-color: #FFFFFF; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .stMetric { background-color: #FFFFFF; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-left: 5px solid #1B365D; }
+        .footer { text-align: center; padding: 25px; color: #6C757D; font-size: 14px; border-top: 1px solid #E9ECEF; margin-top: 50px; }
+        .update-box { background-color: #E8EEF5; padding: 12px; border-radius: 6px; font-size: 13px; color: #1B365D; margin-bottom: 20px; border: 1px solid #CBD5E1; }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# FUNÇÕES DE PROCESSAMENTO E NORMALIZAÇÃO (CVM)
+# DICIONÁRIO DE TRADUÇÃO DE COLUNAS (PADRÃO PROFISSIONAL)
 # ---------------------------------------------------------
+COLUNAS_AMIGAVEIS = {
+    'NOME_FIDC_INVESTIDO': 'FIDC Investido',
+    'PL_FIDC_INVESTIDO_RS': 'PL do FIDC',
+    'CNPJ_FIDC_INVESTIDO': 'CNPJ do FIDC',
+    'GESTOR_FIDC_INVESTIDO': 'Gestor do FIDC',
+    'ADMINISTRADOR_FIDC_INVESTIDO': 'Adm. do FIDC',
+    'COTISTAS_FIDC_INVESTIDO': 'Cotistas do FIDC',
+    'NOME_FUNDO_INVESTIDOR': 'Fundo Investidor',
+    'PL_FUNDO_INVESTIDOR_RS': 'PL do Fundo Investidor',
+    'CNPJ_FUNDO_INVESTIDOR': 'CNPJ do Fundo',
+    'GESTOR_FUNDO_INVESTIDOR': 'Gestor do Fundo',
+    'ADMINISTRADOR_FUNDO_INVESTIDOR': 'Adm. do Fundo',
+    'TIPO_FUNDO_INVESTIDOR': 'Tipo de Fundo',
+    'PUBLICO_ALVO_INVESTIDOR': 'Público Alvo',
+    'COTISTAS_FUNDO_INVESTIDOR': 'Cotistas do Fundo',
+    'VALOR_ALOCADO_RS': 'Valor Alocado',
+    'PARTICIPACAO_PL_INVESTIDOR': '% Part. PL Fundo',
+    'PARTICIPACAO_PL_FIDC': '% Part. PL FIDC',
+    'ORIGEM_CAPTACAO': 'Origem da Captação',
+    'MESMA_GESTORA': 'Mesma Gestora',
+    'MES': 'Mês de Referência'
+}
+
+# ---------------------------------------------------------
+# FUNÇÕES DE FORMATAÇÃO E NORMALIZAÇÃO (PADRÃO BR)
+# ---------------------------------------------------------
+def formatar_brl(val):
+    if pd.isna(val) or val == 0:
+        return "R$ 0,00"
+    s = f"R$ {val:,.2f}"
+    return s.replace(",", "TEMP").replace(".", ",").replace("TEMP", ".")
+
+def formatar_pct(val):
+    if pd.isna(val):
+        return "0,00%"
+    s = f"{val * 100:,.2f}%"
+    return s.replace(",", "TEMP").replace(".", ",").replace("TEMP", ".")
+
 def obter_nome_mes(ano_mes):
     ano = ano_mes[:4]
     mes_num = ano_mes[4:]
@@ -279,38 +319,74 @@ def carregar_dados_completos():
     df_master = pd.concat(master_list, ignore_index=True) if master_list else pd.DataFrame()
     return dados_por_mes, df_master
 
+def preparar_df_exibicao(df):
+    df_disp = df.copy()
+    for col in ['PL_FIDC_INVESTIDO_RS', 'PL_FUNDO_INVESTIDOR_RS', 'VALOR_ALOCADO_RS']:
+        if col in df_disp.columns:
+            df_disp[col] = df_disp[col].apply(formatar_brl)
+    for col in ['PARTICIPACAO_PL_INVESTIDOR', 'PARTICIPACAO_PL_FIDC']:
+        if col in df_disp.columns:
+            df_disp[col] = df_disp[col].apply(formatar_pct)
+    # Renomeia para colunas amigáveis
+    df_disp = df_disp.rename(columns=COLUNAS_AMIGAVEIS)
+    return df_disp
+
 # ---------------------------------------------------------
 # INTERFACE VISUAL DO APLICATIVO
 # ---------------------------------------------------------
 st.title("📊 Inteligência de Mercado: Alocações em FIDCs")
-st.markdown("Painel executivo estruturado com base nos dados públicos da CVM (Resolução CVM 175 e CDA).")
+st.markdown("Painel analítico executivo estruturado com base nos dados públicos da CVM (Resolução CVM 175 e CDA).")
 
 dados_por_mes, df_master = carregar_dados_completos()
 
 if not df_master.empty:
     meses_disponiveis = list(dados_por_mes.keys())
     
-    # Barra lateral de navegação
-    st.sidebar.header("⚙️ Configurações de Filtro")
+    # Barra lateral de filtros e informações de atualização
+    st.sidebar.header("⚙️ Configurações & Filtros")
+    
+    st.sidebar.markdown("""
+        <div class="update-box">
+            <b>📅 Cronograma de Atualização:</b><br>
+            A base de dados é atualizada automaticamente toda <b>segunda-feira</b> com os novos arquivos disponibilizados pela CVM.
+        </div>
+    """, unsafe_allow_html=True)
+
     mes_escolhido = st.sidebar.selectbox("Selecione o Mês Base:", meses_disponiveis, format_func=obter_nome_mes)
     
     df_filtrado = dados_por_mes[mes_escolhido]
 
-    # Abas estruturadas idênticas à lógica do Excel profissional
-    aba_dash, aba_mensal, aba_consolidada = st.tabs([
+    # Filtros Avançados na Barra Lateral
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔍 Filtros Avançados")
+    
+    gestores_disponiveis = sorted(df_filtrado['GESTOR_FUNDO_INVESTIDOR'].dropna().unique())
+    gestor_filtro = st.sidebar.multiselect("Filtrar por Gestora:", gestores_disponiveis)
+
+    origens_disponiveis = sorted(df_filtrado['ORIGEM_CAPTACAO'].dropna().unique())
+    origem_filtro = st.sidebar.multiselect("Origem da Captação:", origens_disponiveis)
+
+    # Aplicar filtros ao dataframe do mês
+    if gestor_filtro:
+        df_filtrado = df_filtrado[df_filtrado['GESTOR_FUNDO_INVESTIDOR'].isin(gestor_filtro)]
+    if origem_filtro:
+        df_filtrado = df_filtrado[df_filtrado['ORIGEM_CAPTACAO'].isin(origem_filtro)]
+
+    aba_dash, aba_mensal, aba_consolidada, aba_manual = st.tabs([
         "📈 Painel Executivo (Dashboard)", 
         f"📅 Detalhado ({obter_nome_mes(mes_escolhido)})", 
-        "📚 Base Consolidada (Série Histórica)"
+        "📚 Base Consolidada",
+        "📖 Manual de Utilização"
     ])
 
     with aba_dash:
         st.subheader(f"Visão Executiva do Período: {obter_nome_mes(mes_escolhido)}")
         
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Volume Total Alocado", f"R$ {df_filtrado['VALOR_ALOCADO_RS'].sum():,.2f}")
-        col2.metric("Total de Alocações", len(df_filtrado))
-        col3.metric("FIDCs Distintos", df_filtrado['CNPJ_FIDC_INVESTIDO'].nunique())
-        col4.metric("Fundos Investidores", df_filtrado['CNPJ_FUNDO_INVESTIDOR'].nunique())
+        col1.metric("Volume Total Alocado", formatar_brl(df_filtrado['VALOR_ALOCADO_RS'].sum()))
+        col2.metric("Total de Alocações", f"{len(df_filtrado):,}".replace(",", "."))
+        col3.metric("FIDCs Distintos", f"{df_filtrado['CNPJ_FIDC_INVESTIDO'].nunique():,}".replace(",", "."))
+        col4.metric("Fundos Investidores", f"{df_filtrado['CNPJ_FUNDO_INVESTIDOR'].nunique():,}".replace(",", "."))
 
         st.markdown("---")
         
@@ -320,48 +396,59 @@ if not df_master.empty:
             st.markdown("### 🏆 Top Fundos Investidores por Volume")
             top_fundos = df_filtrado.groupby('NOME_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
             top_fundos = top_fundos.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
-            top_fundos['VALOR_ALOCADO_RS'] = top_fundos['VALOR_ALOCADO_RS'].apply(lambda x: f"R$ {x:,.2f}")
-            st.dataframe(top_fundos, use_container_width=True, hide_index=True)
+            top_fundos.insert(0, 'Pos.', range(1, len(top_fundos) + 1))
+            top_fundos['VALOR_ALOCADO_RS'] = top_fundos['VALOR_ALOCADO_RS'].apply(formatar_brl)
+            top_fundos.columns = ['Pos.', 'Fundo Investidor', 'Valor Total Alocado']
+            st.dataframe(top_fundos, use_container_width=True, hide_index=True, height=400)
 
         with col_g2:
             st.markdown("### 🏢 Top Gestoras Investidoras por Volume")
             top_gestoras = df_filtrado.groupby('GESTOR_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
             top_gestoras = top_gestoras.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
-            top_gestoras['VALOR_ALOCADO_RS'] = top_gestoras['VALOR_ALOCADO_RS'].apply(lambda x: f"R$ {x:,.2f}")
-            st.dataframe(top_gestoras, use_container_width=True, hide_index=True)
+            top_gestoras.insert(0, 'Pos.', range(1, len(top_gestoras) + 1))
+            top_gestoras['VALOR_ALOCADO_RS'] = top_gestoras['VALOR_ALOCADO_RS'].apply(formatar_brl)
+            top_gestoras.columns = ['Pos.', 'Gestora Investidora', 'Valor Total Alocado']
+            st.dataframe(top_gestoras, use_container_width=True, hide_index=True, height=400)
 
     with aba_mensal:
         st.subheader(f"Detalhamento Completo - {obter_nome_mes(mes_escolhido)}")
-        st.markdown("Tabela completa com todas as alocações, máscaras de CNPJ aplicadas e formatação monetária.")
-        
-        st.dataframe(
-            df_filtrado,
-            use_container_width=True,
-            column_config={
-                "PL_FIDC_INVESTIDO_RS": st.column_config.NumberColumn("PL FIDC", format="R$ %.2f"),
-                "PL_FUNDO_INVESTIDOR_RS": st.column_config.NumberColumn("PL Fundo Investidor", format="R$ %.2f"),
-                "VALOR_ALOCADO_RS": st.column_config.NumberColumn("Valor Alocado", format="R$ %.2f"),
-                "PARTICIPACAO_PL_INVESTIDOR": st.column_config.NumberColumn("% Part. PL Fundo", format="%.2f%%"),
-                "PARTICIPACAO_PL_FIDC": st.column_config.NumberColumn("% Part. PL FIDC", format="%.2f%%"),
-                "COTISTAS_FIDC_INVESTIDO": st.column_config.NumberColumn("Cotistas FIDC", format="%d"),
-                "COTISTAS_FUNDO_INVESTIDOR": st.column_config.NumberColumn("Cotistas Fundo", format="%d"),
-            }
-        )
+        st.markdown("Tabela analítica completa contendo todas as alocações cruzadas, filtros aplicados e formatação monetária padrão BR.")
+        st.dataframe(preparar_df_exibicao(df_filtrado), use_container_width=True, hide_index=True, height=600)
 
     with aba_consolidada:
         st.subheader("📚 Série Histórica Consolidada")
-        st.markdown("Histórico completo de todos os meses processados no ano corrente.")
-        
-        st.dataframe(
-            df_master,
-            use_container_width=True,
-            column_config={
-                "PL_FIDC_INVESTIDO_RS": st.column_config.NumberColumn("PL FIDC", format="R$ %.2f"),
-                "PL_FUNDO_INVESTIDOR_RS": st.column_config.NumberColumn("PL Fundo Investidor", format="R$ %.2f"),
-                "VALOR_ALOCADO_RS": st.column_config.NumberColumn("Valor Alocado", format="R$ %.2f"),
-                "PARTICIPACAO_PL_INVESTIDOR": st.column_config.NumberColumn("% Part. PL Fundo", format="%.2f%%"),
-                "PARTICIPACAO_PL_FIDC": st.column_config.NumberColumn("% Part. PL FIDC", format="%.2f%%"),
-            }
-        )
+        st.markdown("Base de dados histórica completa de todos os meses processados no ano corrente.")
+        st.dataframe(preparar_df_exibicao(df_master), use_container_width=True, hide_index=True, height=600)
+
+    with aba_manual:
+        st.subheader("📖 Manual de Utilização e Metodologia")
+        st.markdown("""
+        Bem-vindo ao **Painel de Inteligência de Mercado de FIDCs**. Esta ferramenta foi desenvolvida para automatizar a extração, tratamento e consolidação de dados públicos disponibilizados pela **Comissão de Valores Mobiliários (CVM)**.
+
+        ### 🔍 1. Fontes de Dados Utilizadas
+        * **Documentação de Carteiras e Ativos (CDA):** Dados mensais detalhando as posições e alocações de ativos dentro dos Fundos de Investimento.
+        * **Informe Diário:** Posições atualizadas de Patrimônio Líquido (PL) e quantidade de cotistas.
+        * **Cadastros CVM (Resolução CVM 175):** Informações cadastrais de fundos, classes, gestores e administradores.
+
+        ### 📅 2. Frequência de Atualização
+        * A base possui cache inteligente e é atualizada automaticamente **toda segunda-feira** para refletir os envios mais recentes por parte dos administradores regulados pela CVM.
+
+        ### ⚙️ 3. Lógica e Processamento
+        * **Cruzamento Automático:** O sistema cruza os blocos de carteira (Bloco 2 do CDA) para identificar quais fundos possuem cotas ou alocações em FIDCs.
+        * **Detecção de Mesma Gestora:** Identifica se a captação ocorreu no mercado aberto (terceiros) ou de forma proprietária (mesma casa / gestora).
+        * **Formatação Brasileira:** Valores monetários e percentuais seguem rigorosamente o padrão nacional (`R$` com pontos nos milhares e vírgulas nos decimais).
+
+        ### 🚀 4. Como Navegar
+        * Use o seletor na barra lateral esquerda para alternar o **Mês Base** da análise e utilize os **Filtros Avançados** de gestora e origem.
+        * Utilize as abas superiores para alternar entre o **Dashboard Executivo**, a **Tabela Detalhada do Mês** e a **Série Histórica**.
+        """)
+
 else:
     st.error("Não foram encontrados dados de CDA disponíveis na CVM para o período atual.")
+
+# Rodapé oficial
+st.markdown("""
+    <div class="footer">
+        Desenvolvido por <b>João Victor Helito</b> &copy; 2026 — Todos os direitos reservados.
+    </div>
+""", unsafe_allow_html=True)
