@@ -327,7 +327,6 @@ def preparar_df_exibicao(df):
     for col in ['PARTICIPACAO_PL_INVESTIDOR', 'PARTICIPACAO_PL_FIDC']:
         if col in df_disp.columns:
             df_disp[col] = df_disp[col].apply(formatar_pct)
-    # Renomeia para colunas amigáveis
     df_disp = df_disp.rename(columns=COLUNAS_AMIGAVEIS)
     return df_disp
 
@@ -342,7 +341,6 @@ dados_por_mes, df_master = carregar_dados_completos()
 if not df_master.empty:
     meses_disponiveis = list(dados_por_mes.keys())
     
-    # Barra lateral de filtros e informações de atualização
     st.sidebar.header("⚙️ Configurações & Filtros")
     
     st.sidebar.markdown("""
@@ -354,94 +352,100 @@ if not df_master.empty:
 
     mes_escolhido = st.sidebar.selectbox("Selecione o Mês Base:", meses_disponiveis, format_func=obter_nome_mes)
     
-    df_filtrado = dados_por_mes[mes_escolhido]
+    df_mes_base = dados_por_mes[mes_escolhido]
 
-    # Filtros Avançados na Barra Lateral
     st.sidebar.markdown("---")
     st.sidebar.subheader("🔍 Filtros Avançados")
     
-    gestores_disponiveis = sorted(df_filtrado['GESTOR_FUNDO_INVESTIDOR'].dropna().unique())
+    gestores_disponiveis = sorted(df_mes_base['GESTOR_FUNDO_INVESTIDOR'].dropna().unique())
     gestor_filtro = st.sidebar.multiselect("Filtrar por Gestora:", gestores_disponiveis)
 
-    origens_disponiveis = sorted(df_filtrado['ORIGEM_CAPTACAO'].dropna().unique())
+    origens_disponiveis = sorted(df_mes_base['ORIGEM_CAPTACAO'].dropna().unique())
     origem_filtro = st.sidebar.multiselect("Origem da Captação:", origens_disponiveis)
 
-    # Aplicar filtros ao dataframe do mês
-    if gestor_filtro:
-        df_filtrado = df_filtrado[df_filtrado['GESTOR_FUNDO_INVESTIDOR'].isin(gestor_filtro)]
-    if origem_filtro:
-        df_filtrado = df_filtrado[df_filtrado['ORIGEM_CAPTACAO'].isin(origem_filtro)]
+    # Botão de Filtrar
+    btn_filtrar = st.sidebar.button("Filtrar Dados", type="primary", use_container_width=True)
 
-    aba_dash, aba_mensal, aba_consolidada, aba_manual = st.tabs([
+    # Gerenciamento de Estado dos Filtros
+    if 'mes_atual' not in st.session_state or st.session_state.mes_atual != mes_escolhido:
+        st.session_state.mes_atual = mes_escolhido
+        st.session_state.df_filtrado = df_mes_base.copy()
+
+    if btn_filtrar:
+        df_temp = df_mes_base.copy()
+        if gestor_filtro:
+            df_temp = df_temp[df_temp['GESTOR_FUNDO_INVESTIDOR'].isin(gestor_filtro)]
+        if origem_filtro:
+            df_temp = df_temp[df_temp['ORIGEM_CAPTACAO'].isin(origem_filtro)]
+        st.session_state.df_filtrado = df_temp
+
+    df_filtrado = st.session_state.df_filtrado
+
+    # Manual de Utilização integrado na Barra Lateral (Expander)
+    with st.sidebar.expander("📖 Manual de Utilização"):
+        st.markdown("""
+        **1. Fontes de Dados:**
+        Extração automática dos arquivos CDA, Informe Diário e Cadastros da CVM (Resolução 175).
+        
+        **2. Atualização:**
+        Atualização automática programada para toda **segunda-feira**.
+        
+        **3. Filtros:**
+        Selecione as opções desejadas e clique em **Filtrar Dados** para atualizar a visualização.
+        """)
+
+    aba_dash, aba_mensal, aba_consolidada = st.tabs([
         "📈 Painel Executivo (Dashboard)", 
         f"📅 Detalhado ({obter_nome_mes(mes_escolhido)})", 
-        "📚 Base Consolidada",
-        "📖 Manual de Utilização"
+        "📚 Base Consolidada"
     ])
 
     with aba_dash:
         st.subheader(f"Visão Executiva do Período: {obter_nome_mes(mes_escolhido)}")
         
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Volume Total Alocado", formatar_brl(df_filtrado['VALOR_ALOCADO_RS'].sum()))
-        col2.metric("Total de Alocações", f"{len(df_filtrado):,}".replace(",", "."))
-        col3.metric("FIDCs Distintos", f"{df_filtrado['CNPJ_FIDC_INVESTIDO'].nunique():,}".replace(",", "."))
-        col4.metric("Fundos Investidores", f"{df_filtrado['CNPJ_FUNDO_INVESTIDOR'].nunique():,}".replace(",", "."))
+        if df_filtrado.empty:
+            st.warning("⚠️ **Nenhum registro encontrado** com os filtros selecionados. Por favor, ajuste os critérios na barra lateral e clique em 'Filtrar Dados' novamente.")
+        else:
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Volume Total Alocado", formatar_brl(df_filtrado['VALOR_ALOCADO_RS'].sum()))
+            col2.metric("Total de Alocações", f"{len(df_filtrado):,}".replace(",", "."))
+            col3.metric("FIDCs Distintos", f"{df_filtrado['CNPJ_FIDC_INVESTIDO'].nunique():,}".replace(",", "."))
+            col4.metric("Fundos Investidores", f"{df_filtrado['CNPJ_FUNDO_INVESTIDOR'].nunique():,}".replace(",", "."))
 
-        st.markdown("---")
-        
-        col_g1, col_g2 = st.columns(2)
-        
-        with col_g1:
-            st.markdown("### 🏆 Top Fundos Investidores por Volume")
-            top_fundos = df_filtrado.groupby('NOME_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
-            top_fundos = top_fundos.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
-            top_fundos.insert(0, 'Pos.', range(1, len(top_fundos) + 1))
-            top_fundos['VALOR_ALOCADO_RS'] = top_fundos['VALOR_ALOCADO_RS'].apply(formatar_brl)
-            top_fundos.columns = ['Pos.', 'Fundo Investidor', 'Valor Total Alocado']
-            st.dataframe(top_fundos, use_container_width=True, hide_index=True, height=400)
+            st.markdown("---")
+            
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                st.markdown("### 🏆 Top Fundos Investidores por Volume")
+                top_fundos = df_filtrado.groupby('NOME_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
+                top_fundos = top_fundos.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
+                top_fundos.insert(0, 'Pos.', range(1, len(top_fundos) + 1))
+                top_fundos['VALOR_ALOCADO_RS'] = top_fundos['VALOR_ALOCADO_RS'].apply(formatar_brl)
+                top_fundos.columns = ['Pos.', 'Fundo Investidor', 'Valor Total Alocado']
+                st.dataframe(top_fundos, use_container_width=True, hide_index=True, height=400)
 
-        with col_g2:
-            st.markdown("### 🏢 Top Gestoras Investidoras por Volume")
-            top_gestoras = df_filtrado.groupby('GESTOR_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
-            top_gestoras = top_gestoras.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
-            top_gestoras.insert(0, 'Pos.', range(1, len(top_gestoras) + 1))
-            top_gestoras['VALOR_ALOCADO_RS'] = top_gestoras['VALOR_ALOCADO_RS'].apply(formatar_brl)
-            top_gestoras.columns = ['Pos.', 'Gestora Investidora', 'Valor Total Alocado']
-            st.dataframe(top_gestoras, use_container_width=True, hide_index=True, height=400)
+            with col_g2:
+                st.markdown("### 🏢 Top Gestoras Investidoras por Volume")
+                top_gestoras = df_filtrado.groupby('GESTOR_FUNDO_INVESTIDOR')['VALOR_ALOCADO_RS'].sum().reset_index()
+                top_gestoras = top_gestoras.sort_values(by='VALOR_ALOCADO_RS', ascending=False).head(10)
+                top_gestoras.insert(0, 'Pos.', range(1, len(top_gestoras) + 1))
+                top_gestoras['VALOR_ALOCADO_RS'] = top_gestoras['VALOR_ALOCADO_RS'].apply(formatar_brl)
+                top_gestoras.columns = ['Pos.', 'Gestora Investidora', 'Valor Total Alocado']
+                st.dataframe(top_gestoras, use_container_width=True, hide_index=True, height=400)
 
     with aba_mensal:
         st.subheader(f"Detalhamento Completo - {obter_nome_mes(mes_escolhido)}")
         st.markdown("Tabela analítica completa contendo todas as alocações cruzadas, filtros aplicados e formatação monetária padrão BR.")
-        st.dataframe(preparar_df_exibicao(df_filtrado), use_container_width=True, hide_index=True, height=600)
+        if df_filtrado.empty:
+            st.warning("⚠️ **Nenhum registro encontrado** para os filtros aplicados neste período.")
+        else:
+            st.dataframe(preparar_df_exibicao(df_filtrado), use_container_width=True, hide_index=True, height=600)
 
     with aba_consolidada:
         st.subheader("📚 Série Histórica Consolidada")
         st.markdown("Base de dados histórica completa de todos os meses processados no ano corrente.")
         st.dataframe(preparar_df_exibicao(df_master), use_container_width=True, hide_index=True, height=600)
-
-    with aba_manual:
-        st.subheader("📖 Manual de Utilização e Metodologia")
-        st.markdown("""
-        Bem-vindo ao **Painel de Inteligência de Mercado de FIDCs**. Esta ferramenta foi desenvolvida para automatizar a extração, tratamento e consolidação de dados públicos disponibilizados pela **Comissão de Valores Mobiliários (CVM)**.
-
-        ### 🔍 1. Fontes de Dados Utilizadas
-        * **Documentação de Carteiras e Ativos (CDA):** Dados mensais detalhando as posições e alocações de ativos dentro dos Fundos de Investimento.
-        * **Informe Diário:** Posições atualizadas de Patrimônio Líquido (PL) e quantidade de cotistas.
-        * **Cadastros CVM (Resolução CVM 175):** Informações cadastrais de fundos, classes, gestores e administradores.
-
-        ### 📅 2. Frequência de Atualização
-        * A base possui cache inteligente e é atualizada automaticamente **toda segunda-feira** para refletir os envios mais recentes por parte dos administradores regulados pela CVM.
-
-        ### ⚙️ 3. Lógica e Processamento
-        * **Cruzamento Automático:** O sistema cruza os blocos de carteira (Bloco 2 do CDA) para identificar quais fundos possuem cotas ou alocações em FIDCs.
-        * **Detecção de Mesma Gestora:** Identifica se a captação ocorreu no mercado aberto (terceiros) ou de forma proprietária (mesma casa / gestora).
-        * **Formatação Brasileira:** Valores monetários e percentuais seguem rigorosamente o padrão nacional (`R$` com pontos nos milhares e vírgulas nos decimais).
-
-        ### 🚀 4. Como Navegar
-        * Use o seletor na barra lateral esquerda para alternar o **Mês Base** da análise e utilize os **Filtros Avançados** de gestora e origem.
-        * Utilize as abas superiores para alternar entre o **Dashboard Executivo**, a **Tabela Detalhada do Mês** e a **Série Histórica**.
-        """)
 
 else:
     st.error("Não foram encontrados dados de CDA disponíveis na CVM para o período atual.")
